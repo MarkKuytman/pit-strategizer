@@ -72,7 +72,7 @@ def test_options_never_exceed_max_stops() -> None:
 
 
 def test_every_pit_lap_lies_on_the_grid_and_within_the_race() -> None:
-    race_state = make_race_state(total_laps=10)
+    race_state = make_race_state(lap=1, total_laps=10)
     enumeration = Enumeration(max_stops=2, pit_lap_grid=3)
 
     result = enumerate_candidates(race_state, enumeration)
@@ -81,6 +81,34 @@ def test_every_pit_lap_lies_on_the_grid_and_within_the_race() -> None:
     assert set(laps) == {3, 6, 9}
     assert all(lap % enumeration.pit_lap_grid == 0 for lap in laps)
     assert all(1 <= lap <= race_state.context.total_laps for lap in laps)
+
+
+def test_no_option_pits_before_the_decision_lap() -> None:
+    race_state = make_race_state(lap=5, total_laps=20)
+
+    result = enumerate_candidates(race_state, Enumeration(max_stops=2, pit_lap_grid=3))
+
+    laps = [stop.lap for option in result for stop in option.stops]
+    assert laps
+    assert min(laps) >= race_state.context.lap
+
+
+def test_a_stop_on_the_decision_lap_is_offered() -> None:
+    race_state = make_race_state(lap=6, total_laps=20)
+
+    result = enumerate_candidates(race_state, Enumeration(max_stops=1, pit_lap_grid=3))
+
+    assert "1STOP-L6S" in result.ids
+
+
+def test_two_decision_laps_produce_different_candidate_sets() -> None:
+    enumeration = Enumeration(max_stops=2, pit_lap_grid=3)
+
+    early = enumerate_candidates(make_race_state(lap=6, total_laps=12), enumeration)
+    late = enumerate_candidates(make_race_state(lap=9, total_laps=12), enumeration)
+
+    assert early.ids != late.ids
+    assert set(late.ids) < set(early.ids)
 
 
 def test_compounds_are_derived_as_the_union_of_those_in_use() -> None:
@@ -118,6 +146,7 @@ def test_canonical_two_stop_id_matches_the_glossary_example() -> None:
     race_state = make_race_state(
         subject_compound=Compound.MEDIUM,
         rival_compounds=(Compound.HARD,),
+        lap=1,
         total_laps=58,
     )
 
@@ -128,7 +157,7 @@ def test_canonical_two_stop_id_matches_the_glossary_example() -> None:
 
 def test_ordering_is_fewest_stops_then_structural() -> None:
     result = enumerate_candidates(
-        make_race_state(total_laps=10), Enumeration(max_stops=2, pit_lap_grid=3)
+        make_race_state(lap=1, total_laps=10), Enumeration(max_stops=2, pit_lap_grid=3)
     )
 
     counts = [option.stop_count for option in result]
@@ -156,7 +185,7 @@ def test_ordering_is_fewest_stops_then_structural() -> None:
 
 def test_two_stop_enumeration_is_complete() -> None:
     result = enumerate_candidates(
-        make_race_state(total_laps=10), Enumeration(max_stops=2, pit_lap_grid=3)
+        make_race_state(lap=1, total_laps=10), Enumeration(max_stops=2, pit_lap_grid=3)
     )
 
     assert len(result) == 1 + 3 * 3 + 3 * 9

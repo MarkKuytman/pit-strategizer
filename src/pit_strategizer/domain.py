@@ -122,7 +122,12 @@ class Rival:
 
 @dataclass(frozen=True)
 class RaceContext:
-    """The race circumstances around a decision moment."""
+    """The race circumstances around a decision moment.
+
+    ``track_temp_c`` is rendering-only: it is carried for the strategist's
+    request and the report but does not enter the ground-truth lap-time model
+    (see ``pit_strategizer.simulator``).
+    """
 
     lap: int
     total_laps: int

@@ -237,6 +237,14 @@ def test_evaluating_the_same_scenarios_twice_gives_identical_reports() -> None:
     assert first.outcomes == second.outcomes
 
 
+def test_mean_time_lost_is_not_dominated_by_an_absurd_option() -> None:
+    report = evaluate([PerfectStrategist(), WorstStrategist()], [real_scenario()])
+
+    # The cliff cap keeps the worst option's loss on the order of the remaining
+    # race, so the mean cannot be swamped by one absurd stint.
+    assert 0.0 < report.mean_time_lost_s < 100.0
+
+
 def test_evaluating_no_scenarios_yields_an_empty_report() -> None:
     report = evaluate([PerfectStrategist()], [])
 

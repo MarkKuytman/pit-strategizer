@@ -8,16 +8,18 @@ only relative comparisons between strategy options are meaningful.
 The model, in full
 ------------------
 
-A race runs from lap 1 to ``RaceContext.total_laps`` inclusive. Every option
-starts on the subject car's compound but on fresh tyres: the subject's current
-``tyre_age`` and ``RaceContext.lap`` describe the decision moment for rendering
-and enumeration, not the simulation start.
+The simulator scores only the part of the race still to be run at the decision
+moment: from ``RaceContext.lap`` to ``RaceContext.total_laps`` inclusive. The
+subject enters that remaining race on its current compound with
+``SubjectCar.tyre_age`` laps already on the tyre, so the decision moment is
+load-bearing rather than decorative.
 
-A stint's ``tyre_age`` on a lap is the number of laps completed on that set:
-1 on a stint's first lap, 2 on its second, and so on. A stop on lap ``L`` ends
-the outgoing stint on lap ``L`` (which is still driven on its old tyres), costs
-the pit loss once, and the new compound is first used on lap ``L + 1``. A
-no-stop option is therefore a single stint from lap 1.
+A stint's ``tyre_age`` on a lap is the number of laps completed on that set: the
+subject's ``tyre_age`` on ``RaceContext.lap``, one more on the next lap, and so
+on. A stop on lap ``L`` ends the outgoing stint on lap ``L`` (which is still
+driven on its old tyres), costs the pit loss once, and the new compound is first
+used on lap ``L + 1``. A no-stop option is therefore a single stint continuing
+from the decision moment.
 
 The lap time on lap ``lap``, on a tyre of ``tyre_age``, with ``laps_remaining``
 laps still to run (including the current one) is::
@@ -28,21 +30,35 @@ laps still to run (including the current one) is::
              + cliff_penalty(tyre_age, compound)
 
 where the cliff penalty is zero up to and including the compound's cliff age and
-grows quadratically beyond it::
+grows quadratically beyond it, capped so one absurd stint cannot dominate::
 
-    cliff_penalty = CLIFF_PENALTY_S * max(0, tyre_age - CLIFF_TYRE_AGE[compound]) ** 2
+    cliff_penalty = min(CLIFF_PENALTY_S * max(0, tyre_age - CLIFF_TYRE_AGE[compound]) ** 2,
+                        CLIFF_CAP_S)
 
 The quadratic makes the fall-off sharp rather than a slightly steeper slope: the
-first lap past the cliff adds ``CLIFF_PENALTY_S`` (1.0 s), the next 4.0 s, then
-9.0 s. The fuel term falls as the race runs down, so early laps are slower; the
-simulator passes ``laps_remaining = total_laps - lap + 1``.
+first lap past the cliff adds ``CLIFF_PENALTY_S`` (1.0 s) and the next 4.0 s.
+``CLIFF_CAP_S`` truncates the tail at 5.0 s. It cannot change the optimum or the
+ordering of options that stay at or near the cliff; it only reorders options
+already deep in the tail, so no single absurd stint can dominate time lost. The
+fuel term uses the absolute lap number, ``laps_remaining = total_laps - lap + 1``,
+so fuel still falls over the remaining race.
+
+When ``RaceContext.safety_car`` is true the pit loss charged per stop is
+multiplied by ``SAFETY_CAR_PIT_LOSS_FACTOR``, making a stop unusually cheap.
 
 The total race time of an option is the sum of its lap times plus the pit loss
 for each stop::
 
-    total = pit_loss_s * len(stops)
+    total = effective_pit_loss * len(stops)
           + sum(lap_time(lap, age(lap), compound(lap), total_laps - lap + 1)
-                for lap in 1..total_laps)
+                for lap in context.lap..total_laps)
+
+Only ``SubjectCar.compound``, ``SubjectCar.tyre_age`` and the ``RaceContext``
+fields ``lap``, ``total_laps``, ``pit_loss_s`` and ``safety_car`` enter the
+model. ``RaceContext.track_temp_c`` is rendering-only: it is carried on the race
+state for the strategist's request and the report, and does not affect any lap
+time. The subject's gaps and last lap times, and every rival attribute, are
+likewise for rendering only.
 """
 
 from __future__ import annotations
@@ -55,6 +71,7 @@ from typing import Final
 from pit_strategizer.domain import (
     CandidateSet,
     Compound,
+    RaceContext,
     RaceState,
     Stop,
     StrategyOption,
@@ -62,10 +79,12 @@ from pit_strategizer.domain import (
 
 __all__ = [
     "BASE_LAP_S",
+    "CLIFF_CAP_S",
     "CLIFF_PENALTY_S",
     "CLIFF_TYRE_AGE",
     "DEGRADATION_S_PER_LAP",
     "FUEL_BURN_S_PER_LAP",
+    "SAFETY_CAR_PIT_LOSS_FACTOR",
     "SimResult",
     "lap_time",
     "simulate",
@@ -98,11 +117,33 @@ FUEL_BURN_S_PER_LAP: Final[float] = 0.03
 CLIFF_PENALTY_S: Final[float] = 1.0
 """Seconds per squared lap beyond the cliff; makes the fall-off sharp."""
 
+CLIFF_CAP_S: Final[float] = 5.0
+"""Cap on the per-lap cliff penalty; truncates the tail so no stint dominates."""
+
+SAFETY_CAR_PIT_LOSS_FACTOR: Final[float] = 0.5
+"""Multiplier on the pit loss when the safety car is out, making a stop cheaper."""
+
 
 def _cliff_penalty(tyre_age: int, compound: Compound) -> float:
-    """Quadratic penalty for running a tyre past its cliff; zero up to the cliff."""
+    """Quadratic penalty for running a tyre past its cliff, capped at ``CLIFF_CAP_S``.
+
+    Zero up to and including the compound's cliff age. The cap leaves the optimum
+    and the ordering of options that stay at or near the cliff untouched; it only
+    truncates the tail, so no single absurd stint can dominate time lost.
+    """
     laps_past = max(0, tyre_age - CLIFF_TYRE_AGE[compound])
-    return CLIFF_PENALTY_S * laps_past**2
+    return min(CLIFF_PENALTY_S * laps_past**2, CLIFF_CAP_S)
+
+
+def _effective_pit_loss(context: RaceContext) -> float:
+    """Return the pit loss charged per stop at this decision moment.
+
+    A safety car halves the pit loss (``SAFETY_CAR_PIT_LOSS_FACTOR``), so a stop
+    under neutralisation is unusually cheap.
+    """
+    if context.safety_car:
+        return context.pit_loss_s * SAFETY_CAR_PIT_LOSS_FACTOR
+    return context.pit_loss_s
 
 
 def lap_time(lap: int, tyre_age: int, compound: Compound, laps_remaining: int) -> float:
@@ -125,15 +166,19 @@ def lap_time(lap: int, tyre_age: int, compound: Compound, laps_remaining: int) -
 def _tyre_age_and_compound(
     lap: int,
     stops: tuple[Stop, ...],
-    start_compound: Compound,
+    race_state: RaceState,
 ) -> tuple[int, Compound]:
     """Return the tyre age and compound in use on ``lap``.
 
-    A stop on lap ``L`` only takes effect from lap ``L + 1``: the stop lap itself
+    The subject enters the remaining race on its current compound with
+    ``SubjectCar.tyre_age`` laps on the tyre at ``RaceContext.lap``, so the
+    initial stint's age is measured from ``context.lap - subject.tyre_age``. A
+    stop on lap ``L`` only takes effect from lap ``L + 1``: the stop lap itself
     is still run on the outgoing stint's tyres.
     """
-    compound = start_compound
-    reset_lap = 0
+    subject = race_state.subject
+    compound = subject.compound
+    reset_lap = race_state.context.lap - subject.tyre_age
     for stop in stops:
         if stop.lap < lap:
             compound = stop.compound
@@ -143,17 +188,18 @@ def _tyre_age_and_compound(
     return lap - reset_lap, compound
 
 
-def _option_total_time(
-    option: StrategyOption,
-    start_compound: Compound,
-    total_laps: int,
-    pit_loss_s: float,
-) -> float:
-    """Return one option's total race time in seconds."""
-    total = pit_loss_s * option.stop_count
-    for lap in range(1, total_laps + 1):
-        tyre_age, compound = _tyre_age_and_compound(lap, option.stops, start_compound)
-        total += lap_time(lap, tyre_age, compound, total_laps - lap + 1)
+def _option_total_time(option: StrategyOption, race_state: RaceState) -> float:
+    """Return one option's total race time over the laps remaining at the decision moment."""
+    context = race_state.context
+    # ``RaceContext.lap`` may be 0 (before the first lap); scoring cannot start
+    # before lap 1, and the first stint's age is still measured from the decision
+    # moment, so a degenerate lap 0 simply gains a lap of tyre age.
+    first_lap = max(1, context.lap)
+
+    total = _effective_pit_loss(context) * option.stop_count
+    for lap in range(first_lap, context.total_laps + 1):
+        tyre_age, compound = _tyre_age_and_compound(lap, option.stops, race_state)
+        total += lap_time(lap, tyre_age, compound, context.total_laps - lap + 1)
     return total
 
 
@@ -167,23 +213,15 @@ def _check_stops_are_within_the_race(option: StrategyOption, total_laps: int) ->
 
 
 def simulate(race_state: RaceState, candidates: CandidateSet) -> SimResult:
-    """Rank ``candidates`` by total race time over the scenario's race.
+    """Rank ``candidates`` by total race time over the laps remaining at the decision moment.
 
     Pure and deterministic: the result depends only on ``race_state`` and
     ``candidates``, and repeated calls are identical.
     """
-    context = race_state.context
-    start_compound = race_state.subject.compound
-
     times: dict[str, float] = {}
     for option in candidates:
-        _check_stops_are_within_the_race(option, context.total_laps)
-        times[option.id] = _option_total_time(
-            option,
-            start_compound,
-            context.total_laps,
-            context.pit_loss_s,
-        )
+        _check_stops_are_within_the_race(option, race_state.context.total_laps)
+        times[option.id] = _option_total_time(option, race_state)
 
     return SimResult(times=times, candidates=candidates)
 

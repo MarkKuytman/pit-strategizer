@@ -13,8 +13,10 @@ Rules
 * The no-stop option ``0STOP`` is always legal and is always included, so the
   candidate set is never empty.
 * Pit laps are the positive multiples of ``enumeration.pit_lap_grid`` that lie
-  within ``1..race_state.context.total_laps`` inclusive. A grid coarser than the
-  race therefore contributes no pit laps and only ``0STOP`` is offered.
+  within ``race_state.context.lap..race_state.context.total_laps`` inclusive. A
+  stop on the decision lap itself is legal (box this lap); a stop before it is
+  not, because that moment has already passed. A grid with no multiple in that
+  window therefore contributes no pit laps and only ``0STOP`` is offered.
 * Stops within an option are strictly increasing in lap (``StrategyOption``
   enforces this); two-stop options are generated from lap pairs.
 * Compounds are drawn only from those available in the race state. The domain
@@ -56,11 +58,17 @@ def _available_compounds(race_state: RaceState) -> tuple[Compound, ...]:
     return tuple(compound for compound in Compound if compound in in_use)
 
 
+def _ceil_to_grid(value: int, grid: int) -> int:
+    """The smallest positive multiple of ``grid`` at or after ``value``."""
+    return max(grid, -(-value // grid) * grid)
+
+
 def _legal_pit_laps(race_state: RaceState, enumeration: Enumeration) -> tuple[int, ...]:
-    """Positive multiples of the grid within 1..total_laps inclusive."""
-    return tuple(
-        range(enumeration.pit_lap_grid, race_state.context.total_laps + 1, enumeration.pit_lap_grid)
-    )
+    """Positive multiples of the grid within decision_lap..total_laps inclusive."""
+    grid = enumeration.pit_lap_grid
+    # A stop on the decision lap is legal; a stop before it is not.
+    first_lap = _ceil_to_grid(race_state.context.lap, grid)
+    return tuple(range(first_lap, race_state.context.total_laps + 1, grid))
 
 
 def _sort_key(option: StrategyOption) -> tuple[int, tuple[tuple[int, int], ...]]:
