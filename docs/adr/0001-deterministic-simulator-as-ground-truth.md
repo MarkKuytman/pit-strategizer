@@ -1,0 +1,3 @@
+# Deterministic simulator as ground truth
+
+Time lost must be a number we can trust and reproduce, so the prototype scores every strategist against a small deterministic lap-time simulator rather than against historical race outcomes. Historical results are sparse and confounded by weather, incidents and luck, which would make a low time lost indistinguishable from a fortunate race; the simulator gives an exact optimum and a clean seconds-based metric. The price is physical fidelity we do not need — the invented constants mean absolute numbers are not real-world predictions, and only relative comparisons between strategists are meaningful.
