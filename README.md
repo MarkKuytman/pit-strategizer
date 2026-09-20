@@ -79,6 +79,14 @@ pip install -e '.[dev]'
 pit-strategizer --help
 ```
 
+Score the scripted strategists against the ground-truth simulator over the
+shipped scenarios. The table is printed to stdout and a deterministic JSON
+artifact is written to `--report` (default `report.json`):
+
+```sh
+pit-strategizer evaluate --report report.json
+```
+
 ## Test
 
 ```sh
