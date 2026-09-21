@@ -1,0 +1,42 @@
+{
+  "id": "mid-stint-undercut",
+  "archetype": "undercut-threat",
+  "race_state": {
+    "subject": {
+      "driver": "VER",
+      "position": 2,
+      "compound": "medium",
+      "tyre_age": 12,
+      "last_lap_times_s": [91.2, 91.4, 91.7],
+      "gap_ahead_s": 3.4,
+      "gap_behind_s": 1.1
+    },
+    "rivals": [
+      {
+        "driver": "NOR",
+        "compound": "soft",
+        "tyre_age": 9,
+        "gap_s": 3.4,
+        "position": 1
+      },
+      {
+        "driver": "LEC",
+        "compound": "hard",
+        "tyre_age": 15,
+        "gap_s": -1.1,
+        "position": 3
+      }
+    ],
+    "context": {
+      "lap": 32,
+      "total_laps": 58,
+      "track_temp_c": 41.0,
+      "pit_loss_s": 22.0,
+      "safety_car": false
+    }
+  },
+  "enumeration": {
+    "max_stops": 2,
+    "pit_lap_grid": 3
+  }
+}
